@@ -24,6 +24,7 @@ pyshp>=2.3.1
 jinja2>=3.1.3
 redis>=5.0.3
 slowapi>=0.1.9
+xhtml2pdf>=0.2.11
 # Translation: MyMemory API (gratis) — menggunakan httpx yang sudah terinstall, tidak perlu dependency tambahan
 
 # Testing
