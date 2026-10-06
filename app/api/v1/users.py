@@ -1,17 +1,18 @@
-import os
+﻿import os
 import shutil
-
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.core.dependencies import require_admin, require_super_admin
 from app.core.security import get_password_hash
 from app.core.activity import create_activity_log
 from app.models.user import User
-from app.schemas.user import UserCreate, UserResponse, UserUpdate
+from app.schemas.user import UserCreate, UserResponse, UserUpdate, RapidFsAccessRequestBody
 
 # Role yang diizinkan di sistem
 ALLOWED_ROLES = {"admin", "super_admin", "client", "field_officer"}
@@ -81,6 +82,35 @@ def create_user(
     db.refresh(new_user)
 
     return new_user
+
+
+@router.post("/request-rapidfs-access", response_model=UserResponse)
+def request_rapidfs_access(
+    body: Optional[RapidFsAccessRequestBody] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    User (klien/pengguna biasa) mengajukan permohonan akses penuh Rapid-FS kepada admin.
+    """
+    current_user.rapidfs_request_status = "pending"
+    current_user.rapidfs_requested_at = datetime.utcnow()
+    if body and body.project_name:
+        current_user.rapidfs_request_project = body.project_name
+
+    create_activity_log(
+        db=db,
+        user=current_user,
+        action="REQUEST",
+        module="RAPID_FS",
+        target_id=current_user.id,
+        target_name=current_user.full_name or current_user.email,
+        description=f"Mengajukan permohonan akses Rapid-FS penuh{' untuk ' + body.project_name if body and body.project_name else ''}",
+    )
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user
 
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -227,6 +257,10 @@ def update_rapidfs_access(
         raise HTTPException(status_code=404, detail="User tidak ditemukan.")
 
     usr.has_rapidfs_access = has_access
+    if has_access:
+        usr.rapidfs_request_status = "approved"
+    else:
+        usr.rapidfs_request_status = "rejected" if usr.rapidfs_request_status == "pending" else None
 
     create_activity_log(
         db=db,
@@ -235,9 +269,41 @@ def update_rapidfs_access(
         module="USER",
         target_id=usr.id,
         target_name=usr.full_name,
-        description=f"{'Memberikan' if has_access else 'Mencabut'} akses Rapid-FS eksklusif",
+        description=f"{'Memberikan (menyetujui)' if has_access else 'Mencabut'} akses Rapid-FS eksklusif",
     )
 
     db.commit()
     db.refresh(usr)
-    return usr
+    return usr
+
+
+@router.patch("/{user_id}/rapidfs-reject", response_model=UserResponse)
+def reject_rapidfs_access(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    """
+    Menolak permohonan akses Rapid-FS untuk user tertentu.
+    - Dapat diakses oleh **admin** dan **super_admin**.
+    """
+    usr = db.query(User).filter(User.id == user_id).first()
+    if not usr:
+        raise HTTPException(status_code=404, detail="User tidak ditemukan.")
+
+    usr.has_rapidfs_access = False
+    usr.rapidfs_request_status = "rejected"
+
+    create_activity_log(
+        db=db,
+        user=admin_user,
+        action="REJECT",
+        module="USER",
+        target_id=usr.id,
+        target_name=usr.full_name,
+        description="Menolak permohonan akses Rapid-FS eksklusif",
+    )
+
+    db.commit()
+    db.refresh(usr)
+    return usr

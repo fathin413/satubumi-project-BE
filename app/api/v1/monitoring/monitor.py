@@ -1650,6 +1650,7 @@ def get_project_indicators_endpoint(
 @router.get("/{project_id}/compare/baseline", response_model=ProjectBaselineComparisonResponse)
 def get_project_baseline_comparison_endpoint(
     project_id: int,
+    period: str = Query("all", description="Filter periode komparasi: 1m (1 Bulan), 6m (6 Bulan), 1y (1 Tahun), all (Semua/Baseline)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -1664,7 +1665,7 @@ def get_project_baseline_comparison_endpoint(
     - Keragaman Spesies Tercatat
     """
     project = get_project_or_404(project_id, db, current_user)
-    return compare_project_with_baseline(db, project)
+    return compare_project_with_baseline(db, project, period=period)
 
 
 # ─────────────────────────────────────────────

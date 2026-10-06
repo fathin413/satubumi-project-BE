@@ -777,14 +777,30 @@ class ProjectIndicatorsResponse(BaseModel):
 
 
 class BaselineComparisonMetric(BaseModel):
-    """Satu metrik perbandingan antara baseline awal vs kondisi terkini."""
+    """Satu metrik perbandingan antara baseline awal vs kondisi terkini dan target proyek."""
     metric_name: str
     unit: str
     baseline_value: Optional[float] = None
     current_value: Optional[float] = None
+    target_value: Optional[float] = None
+    target_achievement_pct: Optional[float] = None
     change_value: Optional[float] = None
     change_pct: Optional[float] = None
     status: str  # "improved", "stable", "declined"
+
+
+class BaselineTimelinePoint(BaseModel):
+    """Satu titik data pada garis waktu perbandingan baseline proyek."""
+    label: str
+    date: Optional[str] = None
+    period_key: str = ""
+    carbon_stock: float = 0.0
+    trees_planted: int = 0
+    canopy_cover_ha: float = 0.0
+    ndvi_mean: float = 0.0
+    avg_height_cm: float = 0.0
+    progress_pct: float = 0.0
+    species_count: int = 0
 
 
 class ProjectBaselineComparisonResponse(BaseModel):
@@ -793,7 +809,11 @@ class ProjectBaselineComparisonResponse(BaseModel):
     project_name: str
     baseline_date: Optional[date] = None
     current_date: date
+    selected_period: str = "all"
+    available_periods: List[str] = ["1m", "6m", "1y", "all"]
     metrics: List[BaselineComparisonMetric]
+    timeline: List[BaselineTimelinePoint] = []
+    targets: Dict[str, float] = {}
     summary_narrative: str
 
 

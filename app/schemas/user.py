@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 
 from pydantic import BaseModel, EmailStr
 
@@ -10,6 +10,9 @@ class UserBase(BaseModel):
     role: str | None = "client"
     profile_image: str | None = None
     has_rapidfs_access: bool = False
+    rapidfs_request_status: str | None = None
+    rapidfs_requested_at: datetime | None = None
+    rapidfs_request_project: str | None = None
 
 
 class UserCreate(UserBase):
@@ -23,6 +26,9 @@ class UserUpdate(BaseModel):
     role: str | None = None
     is_active: bool | None = None
     has_rapidfs_access: bool | None = None
+    rapidfs_request_status: str | None = None
+    rapidfs_requested_at: datetime | None = None
+    rapidfs_request_project: str | None = None
     password: str | None = None
     profile_image: str | None = None
 
@@ -33,6 +39,11 @@ class ProfileUpdate(BaseModel):
     phone_number: str | None = None
     email: EmailStr | None = None
     password: str | None = None
+
+
+class RapidFsAccessRequestBody(BaseModel):
+    project_name: str | None = None
+    notes: str | None = None
 
 
 class UserLogin(BaseModel):

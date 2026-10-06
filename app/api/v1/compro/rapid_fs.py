@@ -1,9 +1,14 @@
-
+﻿from datetime import datetime
+from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy.orm import Session
 
-from app.api.v1.auth import get_current_user_optional
+from app.api.v1.auth import get_current_user, get_current_user_optional
+from app.core.database import get_db
+from app.core.activity import create_activity_log
 from app.models.user import User
 from app.schemas.rapid_fs import RapidFSInput, RapidFSResult
+from app.schemas.user import RapidFsAccessRequestBody, UserResponse
 from app.services.monitoring.gee_service import gee_service
 from app.services.compro.rapid_fs_engine import calculate_rapid_fs
 from app.services.compro.spatial_parser import parse_shapefile_zip
@@ -40,27 +45,27 @@ async def upload_shapefile(
     current_user: User | None = Depends(get_current_user_optional),
 ):
     """
-    Menerima unggahan file ESRI Shapefile (.zip), melakukan reproyeksi CRS WGS84 (EPSG:4326),
-    menghitung luas area otomatis dalam hektare, dan mengembalikan hasil analisis 7-Stage Rapid-FS.
-    Field `is_unlocked` bernilai True jika user memiliki akses penuh, atau False jika berstatus preview/blur.
+    Ekstraksi poligon dari berkas ESRI Shapefile (.zip),
+    lalu secara otomatis menghitung skor ICPFS dan metrik ekosistem.
     """
     if not file.filename.lower().endswith(".zip"):
         raise HTTPException(
             status_code=400,
-            detail="Format file harus berkas kompresi .zip yang berisi ESRI Shapefile.",
+            detail="Berkas harus dalam format .zip yang berisi komponen Shapefile (.shp, .shx, .dbf, .prj)",
         )
 
+    content = await file.read()
+
     try:
-        contents = await file.read()
-        geojson_polygon, area_ha = parse_shapefile_zip(contents)
+        geojson_polygon, area_ha = parse_shapefile_zip(content)
 
         input_data = RapidFSInput(
             location_name=location_name,
-            polygon_geojson=geojson_polygon,
             area_ha=area_ha,
             ecosystem_type=ecosystem_type,
             project_duration_years=project_duration_years,
             carbon_price_usd=carbon_price_usd,
+            polygon_geojson=geojson_polygon,
         )
 
         spatial_metrics = gee_service.extract_spatial_metrics(geojson_polygon, area_ha)
@@ -78,3 +83,32 @@ async def upload_shapefile(
         raise HTTPException(
             status_code=400, detail=f"Gagal memproses file Shapefile: {e!s}"
         )
+
+
+@router.post("/request-access", response_model=UserResponse)
+def request_rapidfs_access_alias(
+    body: Optional[RapidFsAccessRequestBody] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Alias endpoint bagi user untuk mengajukan permohonan akses Rapid-FS.
+    """
+    current_user.rapidfs_request_status = "pending"
+    current_user.rapidfs_requested_at = datetime.utcnow()
+    if body and body.project_name:
+        current_user.rapidfs_request_project = body.project_name
+
+    create_activity_log(
+        db=db,
+        user=current_user,
+        action="REQUEST",
+        module="RAPID_FS",
+        target_id=current_user.id,
+        target_name=current_user.full_name or current_user.email,
+        description=f"Mengajukan permohonan akses Rapid-FS penuh{' untuk ' + body.project_name if body and body.project_name else ''}",
+    )
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user

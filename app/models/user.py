@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
 
@@ -17,4 +17,7 @@ class User(Base):
     role = Column(String(50), default="client")  # admin, client, analyst
     is_active = Column(Boolean, default=True)
     has_rapidfs_access = Column(Boolean, default=False, nullable=False)
+    rapidfs_request_status = Column(String(50), nullable=True)  # pending, approved, rejected
+    rapidfs_requested_at = Column(DateTime, nullable=True)
+    rapidfs_request_project = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

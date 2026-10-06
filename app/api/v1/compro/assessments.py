@@ -15,9 +15,7 @@ def mask_assessment_if_locked(assessment: Assessment, is_unlocked: bool) -> Asse
     res = AssessmentResponse.model_validate(assessment)
     res.is_unlocked = is_unlocked
     if not is_unlocked:
-        res.agb_ton = None
-        res.carbon_stock_tc = None
-        res.co2e_ton = None
+        # Metrik dasar (agb_ton, carbon_stock_tc, co2e_ton) tetap tampil sebagai preview dasar
         res.acc_total_credits = None
         res.gross_revenue_usd = None
         res.total_cost_usd = None
