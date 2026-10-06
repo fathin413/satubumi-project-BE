@@ -111,14 +111,39 @@ Server akan aktif di `http://localhost:8000`. Dokumentasi interaktif Swagger dap
 
 ---
 
-### 2. Autentikasi Pengguna (JWT Auth)
+### 2. Autentikasi & Manajemen Profil Pengguna (JWT Auth)
 
 * **Register:** `POST /api/v1/auth/register` (Body: `email`, `password`, `full_name`, `phone_number`)
 * **Login:** `POST /api/v1/auth/login` (Body: `email`, `password`)
   * *Mengembalikan `{ "access_token": "eyJhbG..." }`*
 * **Get Profile:** `GET /api/v1/auth/me`
   * *Header:* `Authorization: Bearer <access_token>`
-  * *Response mencakup field:* `"has_rapidfs_access": true | false`
+  * *Response mencakup field:* `"has_rapidfs_access": true | false`, `id`, `email`, `full_name`, `phone_number`, `profile_image`, `role`, `created_at`
+* **Edit Profil Sendiri:** `PUT /api/v1/auth/me` atau `PATCH /api/v1/auth/me`
+  * *Header:* `Authorization: Bearer <access_token>`
+  * *Content-Type:* `application/json`
+  * *Request Body (semua field opsional):*
+    ```json
+    {
+      "full_name": "Nama Baru Pengguna",
+      "phone_number": "081234567890",
+      "email": "emailbaru@example.com",
+      "password": "password_baru_jika_ingin_ganti"
+    }
+    ```
+  * *Response (`200 OK`):* Mengembalikan data `UserResponse` terbaru.
+  * *(Catatan Keamanan: User tidak dapat memodifikasi `role`, `has_rapidfs_access`, maupun status akunnya sendiri)*
+* **Upload Foto Profil Sendiri:** `PUT /api/v1/auth/me/profile-image` atau `POST /api/v1/auth/me/profile-image`
+  * *Header:* `Authorization: Bearer <access_token>`
+  * *Content-Type:* `multipart/form-data`
+  * *Form Field:* `file` (berkas gambar .png/.jpg/.jpeg)
+  * *Response (`200 OK`):*
+    ```json
+    {
+      "message": "Profile image updated",
+      "profile_image": "/static/profile/user_1_avatar.png"
+    }
+    ```
 
 ---
 

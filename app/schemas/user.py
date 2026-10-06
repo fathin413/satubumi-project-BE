@@ -27,6 +27,14 @@ class UserUpdate(BaseModel):
     profile_image: str | None = None
 
 
+class ProfileUpdate(BaseModel):
+    """Schema untuk user mengedit profil miliknya sendiri (tanpa izin ubah role/status)."""
+    full_name: str | None = None
+    phone_number: str | None = None
+    email: EmailStr | None = None
+    password: str | None = None
+
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
