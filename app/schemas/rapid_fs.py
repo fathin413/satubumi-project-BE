@@ -54,25 +54,28 @@ class RapidFSResult(BaseModel):
     project_duration_years: int
     carbon_price_usd: float
 
-    # Karbon metrics
-    carbon_factor: float
-    emission_reduction_rate: float
-    agb_ton: float
-    carbon_stock_tc: float
-    co2e_ton: float
-    annual_emission_reduction: float
-    acc_total_credits: float
+    # Status akses eksklusif (True = full data, False = preview/blurred)
+    is_unlocked: bool = True
 
-    # Financial metrics
-    gross_revenue_usd: float
-    cost_breakdown: CostBreakdown
-    net_revenue_usd: float
+    # Karbon metrics (dapat bernilai None jika is_unlocked == False)
+    carbon_factor: float | None = None
+    emission_reduction_rate: float | None = None
+    agb_ton: float | None = None
+    carbon_stock_tc: float | None = None
+    co2e_ton: float | None = None
+    annual_emission_reduction: float | None = None
+    acc_total_credits: float | None = None
 
-    # Feasibility score
+    # Financial metrics (dapat bernilai None jika is_unlocked == False)
+    gross_revenue_usd: float | None = None
+    cost_breakdown: CostBreakdown | None = None
+    net_revenue_usd: float | None = None
+
+    # Feasibility score (selalu terlihat)
     feasibility_score: float
     feasibility_category: str
     component_scores: ComponentScores
-    recommendations: list[str]
+    recommendations: list[str] | None = None
 
     # Tahap 2: 9 Layer Spasial Overlay & Geometry
     spatial_overlay_layers: dict[str, Any] | None = None

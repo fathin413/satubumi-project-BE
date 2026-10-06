@@ -209,3 +209,35 @@ async def upload_profile_image(
     db.refresh(usr)
 
     return {"message": "Profile image updated", "profile_image": usr.profile_image}
+
+
+@router.patch("/{user_id}/rapidfs-access", response_model=UserResponse)
+def update_rapidfs_access(
+    user_id: int,
+    has_access: bool,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    """
+    Mengubah hak akses eksklusif Rapid-FS untuk user tertentu.
+    - Dapat diakses oleh **admin** dan **super_admin**.
+    """
+    usr = db.query(User).filter(User.id == user_id).first()
+    if not usr:
+        raise HTTPException(status_code=404, detail="User tidak ditemukan.")
+
+    usr.has_rapidfs_access = has_access
+
+    create_activity_log(
+        db=db,
+        user=admin_user,
+        action="UPDATE",
+        module="USER",
+        target_id=usr.id,
+        target_name=usr.full_name,
+        description=f"{'Memberikan' if has_access else 'Mencabut'} akses Rapid-FS eksklusif",
+    )
+
+    db.commit()
+    db.refresh(usr)
+    return usr

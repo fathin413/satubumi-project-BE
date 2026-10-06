@@ -9,6 +9,7 @@ class UserBase(BaseModel):
     phone_number: str | None = None
     role: str | None = "client"
     profile_image: str | None = None
+    has_rapidfs_access: bool = False
 
 
 class UserCreate(UserBase):
@@ -21,6 +22,7 @@ class UserUpdate(BaseModel):
     phone_number: str | None = None
     role: str | None = None
     is_active: bool | None = None
+    has_rapidfs_access: bool | None = None
     password: str | None = None
     profile_image: str | None = None
 

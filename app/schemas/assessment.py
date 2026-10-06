@@ -35,6 +35,7 @@ class AssessmentResponse(BaseModel):
 
     id: int
     user_id: int | None = None
+    is_unlocked: bool = True
 
     # Data kontak submitter
     submitter_name: str | None = None

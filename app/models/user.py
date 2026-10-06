@@ -16,4 +16,5 @@ class User(Base):
     profile_image = Column(String(500), nullable=True)
     role = Column(String(50), default="client")  # admin, client, analyst
     is_active = Column(Boolean, default=True)
+    has_rapidfs_access = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)

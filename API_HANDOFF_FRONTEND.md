@@ -86,15 +86,28 @@ Server akan aktif di `http://localhost:8000`. Dokumentasi interaktif Swagger dap
 
 ---
 
-#### b. Upload Berkas Shapefile (`.zip`)
+#### b. Upload Berkas Shapefile (`.zip`) — Exclusive Feature
 * **Endpoint:** `POST /api/v1/rapid-fs/upload-shapefile`
 * **Content-Type:** `multipart/form-data`
+* **Headers (Opsional tapi disarankan jika user login):**
+  * `Authorization: Bearer <access_token>`
 * **Form Parameters:**
   * `file`: Berkas `.zip` (berisi `.shp`, `.shx`, `.dbf`, `.prj`)
   * `location_name`: Nama Lokasi (string)
   * `ecosystem_type`: Tipe Ekosistem (string)
+  * `project_duration_years`: Durasi proyek (int, default: 30)
+  * `carbon_price_usd`: Harga karbon (float, default: 10.0)
 * **Response (`200 OK`):**
-  Mengembalikan respon kalkulasi Rapid-FS lengkap beserta geometri poligon GeoJSON (proyeksi WGS84) pada field `geometry` yang dapat langsung di-render di atas peta Leaflet.js.
+  Mengembalikan respon kalkulasi Rapid-FS beserta field **`is_unlocked: boolean`**.
+  
+  > 💡 **Ketentuan Tampilan Frontend (Blur):**
+  > - **Jika `is_unlocked === false`:**
+  >   - Tampilkan dengan jelas: **`feasibility_score`**, **`feasibility_category`**, dan **`component_scores`** (Carbon, Legality, Biodiversity, Social, Economy).
+  >   - **BLUR** bagian detail lainnya (AGB ton, Carbon Stock, CO2e, Annual ER, Gross/Net Revenue, Cost Breakdown, Recommendations).
+  >   - Berikan badge: 🔒 **"Fitur Eksklusif"** dan tombol CTA: *"Hubungi Satu Bumi untuk membuka analisis lengkap & unduh laporan resmi"*.
+  >   - User tetap bisa klik tombol **"Simpan ke My Assessment"**!
+  > - **Jika `is_unlocked === true`:**
+  >   - Tampilkan seluruh data secara lengkap tanpa efek blur.
 
 ---
 
@@ -105,14 +118,25 @@ Server akan aktif di `http://localhost:8000`. Dokumentasi interaktif Swagger dap
   * *Mengembalikan `{ "access_token": "eyJhbG..." }`*
 * **Get Profile:** `GET /api/v1/auth/me`
   * *Header:* `Authorization: Bearer <access_token>`
+  * *Response mencakup field:* `"has_rapidfs_access": true | false`
 
 ---
 
-### 3. Histori & Manajemen Assessment Project
+### 3. Histori & Manajemen Assessment Project ("My Assessment")
 
-* **Simpan Hasil Assessment:** `POST /api/v1/assessments` (Mengirimkan payload hasil RapidFSResult)
+* **Simpan Hasil Assessment:** `POST /api/v1/assessments`
+  * Request Body: `AssessmentSubmitRequest` (berisi data kontak + payload `rapid_fs_result`).
+  * Backend akan menyimpan seluruh data kalkulasi secara lengkap ke database.
 * **Lihat Daftar Proyek Tersimpan:** `GET /api/v1/assessments` (Memerlukan Token Auth)
-* **Lihat Detail Proyek:** `GET /api/v1/assessments/{id}`
+* **Lihat Detail Proyek:** `GET /api/v1/assessments/{id}` (Memerlukan Token Auth)
+  
+  > 🔒 **Keamanan & Perilaku My Assessment:**
+  > - Response dari `GET /assessments` dan `GET /assessments/{id}` menyertakan field **`is_unlocked: boolean`**.
+  > - Jika user **belum di-unlock** oleh Admin (`is_unlocked === false`):
+  >   - Field sensitif (`agb_ton`, `carbon_stock_tc`, `co2e_ton`, `acc_total_credits`, `gross_revenue_usd`, `total_cost_usd`, `net_revenue_usd`, `cost_breakdown_json`, `recommendations_json`) **otomatis bernilai `null`** dari backend.
+  >   - Frontend menampilkan badge 🔒 **"Preview / Locked"** dan banner hubungi tim Satu Bumi.
+  > - Setelah user **di-unlock** oleh Admin:
+  >   - User tinggal me-refresh halaman, field `is_unlocked` otomatis menjadi `true`, dan seluruh angka langsung muncul tanpa perlu upload ulang file!
 * **Hapus Proyek:** `DELETE /api/v1/assessments/{id}`
 
 ---
@@ -120,9 +144,24 @@ Server akan aktif di `http://localhost:8000`. Dokumentasi interaktif Swagger dap
 ### 4. Generator PDF Report & Contact Form
 
 * **Download Report PDF:** `GET /api/v1/reports/{id}/pdf`
-  * Mengembalikan *stream binary* berkas PDF laporan resmi Satubumi.
+  * *Header:* `Authorization: Bearer <access_token>`
+  * **Aturan Akses:**
+    - Jika user memiliki akses (`has_rapidfs_access === true` atau Admin) $\rightarrow$ Mengembalikan *stream binary* berkas PDF laporan resmi Satubumi (`200 OK`).
+    - Jika user belum di-unlock $\rightarrow$ Mengembalikan `403 Forbidden` (*"Akses ditolak. Fitur unduh laporan resmi (PDF) hanya tersedia untuk akun yang telah diverifikasi Satu Bumi"*).
+    - Tombol "Download PDF" di Frontend sebaiknya di-disable / diberi ikon gembok jika `is_unlocked === false`.
 * **Form Inquiry Kontak:** `POST /api/v1/contact`
   * Body: `name`, `email`, `company`, `message`
+
+---
+
+### 5. Khusus Admin: Membuka Kunci Akses Pengguna (Unlock Flow)
+
+Ketika calon klien menghubungi tim Satu Bumi dan disetujui, Admin dapat membuka akses akun klien melalui:
+
+* **Endpoint:** `PATCH /api/v1/users/{user_id}/rapidfs-access?has_access=true`
+* **Header:** `Authorization: Bearer <token_admin>`
+* **Response (`200 OK`):** Data user ter-update dengan `has_rapidfs_access: true`.
+* Seketika user tersebut login atau me-refresh halaman, semua proyeknya di My Assessment dan fitur Download PDF langsung terbuka penuh.
 
 ---
 

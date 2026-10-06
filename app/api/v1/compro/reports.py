@@ -1,18 +1,41 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from app.api.v1.auth import get_current_user
 from app.core.database import get_db
 from app.models.assessment import Assessment
+from app.models.user import User
 from app.services.shared.pdf_generator import generate_pdf_report
 
 router = APIRouter(prefix="/reports", tags=["PDF Reports"])
 
 
 @router.get("/{assessment_id}/pdf")
-def download_pdf(assessment_id: int, db: Session = Depends(get_db)):
+def download_pdf(
+    assessment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Mengunduh laporan PDF resmi Rapid-FS.
+    Hanya dapat diakses oleh user yang telah di-unlock (has_rapidfs_access == True) atau Admin.
+    """
     assessment = db.query(Assessment).filter(Assessment.id == assessment_id).first()
     if not assessment:
         raise HTTPException(status_code=404, detail="Assessment tidak ditemukan.")
+
+    is_admin = current_user.role in ["admin", "super_admin"]
+    if not is_admin and assessment.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Akses ditolak."
+        )
+
+    is_unlocked = is_admin or getattr(current_user, "has_rapidfs_access", False)
+    if not is_unlocked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akses ditolak. Fitur unduh laporan resmi (PDF) hanya tersedia untuk akun yang telah diverifikasi Satu Bumi. Silakan hubungi kami.",
+        )
 
     assessment_data = {
         "location_name": assessment.location_name,
