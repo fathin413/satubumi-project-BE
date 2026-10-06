@@ -218,7 +218,7 @@ PDF_HTML_TEMPLATE = """
     </table>
 
     <!-- 3. PROYEKSI KEUANGAN -->
-    <div class="section-title">3. Financial Estimates (Indicative)</div>
+    <div class="section-title">3. Financial Estimates</div>
     <table class="data-table">
         <thead>
             <tr>
