@@ -21,6 +21,7 @@ from app.api.v1.compro.rapid_fs import router as rapid_fs_router
 from app.api.v1.compro.assessments import router as assessments_router
 from app.api.v1.compro.reports import router as reports_router
 from app.api.v1.compro.contact import router as contact_router
+from app.api.v1.compro.currency import router as currency_router
 from app.api.v1.compro import insight_topics, rulebooks, team_member
 from app.api.v1.monitoring import activity
 from app.api.v1.monitoring.projects import router as projects_router
@@ -62,6 +63,7 @@ app.include_router(rapid_fs_router, prefix=api_v1_prefix)
 app.include_router(assessments_router, prefix=api_v1_prefix)
 app.include_router(reports_router, prefix=api_v1_prefix)
 app.include_router(contact_router, prefix=api_v1_prefix)
+app.include_router(currency_router, prefix=api_v1_prefix)
 app.include_router(insight_topics.router, prefix=api_v1_prefix)
 app.include_router(rulebooks.router, prefix=api_v1_prefix)
 app.include_router(team_member.router, prefix=api_v1_prefix)

@@ -190,6 +190,71 @@ Ketika calon klien menghubungi tim Satu Bumi dan disetujui, Admin dapat membuka 
 
 ---
 
+### 6. Kurs & Konversi Mata Uang (USD ⇄ IDR)
+
+Menyediakan data kurs resmi USD ke IDR dan sebaliknya dengan sistem *in-memory cache* otomatis (diperbarui maksimal 1x sehari / toleransi 24 jam).
+
+#### a. Ambil Kurs Acuan Terkini
+* **Endpoint:** `GET /api/v1/currency/rate`
+* **Response (`200 OK`):**
+  ```json
+  {
+    "base_currency": "USD",
+    "target_currency": "IDR",
+    "rate": 17892.58,
+    "inverse_rate": 0.00005589,
+    "last_updated": "2026-10-06T01:07:33Z",
+    "source": "open.er-api.com"
+  }
+  ```
+
+#### b. Konversi Nilai Uang (GET via Query Params)
+* **Endpoint:** `GET /api/v1/currency/convert`
+* **Query Parameters:**
+  * `amount`: Angka nominal yang ingin dikonversi (contoh: `100`)
+  * `from_currency`: Mata uang asal (`USD` atau `IDR`, default: `USD`)
+  * `to_currency`: Mata uang tujuan (`USD` atau `IDR`, default: `IDR`)
+* **Contoh Request:**
+  `GET /api/v1/currency/convert?amount=100&from_currency=USD&to_currency=IDR`
+* **Response (`200 OK`):**
+  ```json
+  {
+    "amount": 100.0,
+    "from_currency": "USD",
+    "to_currency": "IDR",
+    "rate": 17892.58,
+    "result": 1789258.0,
+    "formatted_result": "Rp 1.789.258",
+    "last_updated": "2026-10-06T01:07:33Z"
+  }
+  ```
+
+#### c. Konversi Nilai Uang (POST via JSON Body)
+* **Endpoint:** `POST /api/v1/currency/convert`
+* **Content-Type:** `application/json`
+* **Request Body:**
+  ```json
+  {
+    "amount": 5000000,
+    "from_currency": "IDR",
+    "to_currency": "USD"
+  }
+  ```
+* **Response (`200 OK`):**
+  ```json
+  {
+    "amount": 5000000.0,
+    "from_currency": "IDR",
+    "to_currency": "USD",
+    "rate": 0.00005589,
+    "result": 279.45,
+    "formatted_result": "$279.45",
+    "last_updated": "2026-10-06T01:07:33Z"
+  }
+  ```
+
+---
+
 ## 💻 Contoh Kode Integrasi di Next.js (React)
 
 ### Contoh 1: Memanggil Engine Rapid-FS (`fetch`)
