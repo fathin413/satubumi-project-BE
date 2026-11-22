@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from typing import List, Optional
-from datetime import datetime
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
+from pydantic import BaseModel, Field
 
 from app.core.database import get_db
 from app.models.project import Project
@@ -16,6 +17,7 @@ from app.schemas.monitor import (
 )
 from app.api.v1.auth import get_current_user
 from app.core.dependencies import require_admin, get_project_or_404
+from app.core.security import create_access_token
 from app.services.monitoring.progress_service import calculate_project_progress
 from app.services.monitoring.compare_service import compare_multiple_projects
 
@@ -327,3 +329,87 @@ def remove_project_member(
     db.delete(member)
     db.commit()
     return {"message": f"User {user_id} berhasil dihapus dari proyek {project_id}."}
+
+
+# ── Akses Khusus Lapangan / Surveyor (Field Survey Link & PIN) ──────────────
+
+class FieldAuthRequest(BaseModel):
+    pin: str
+    surveyor_name: str
+
+
+@router.get("/{project_id}/public-info")
+def get_project_public_info(project_id: int, db: Session = Depends(get_db)):
+    """
+    Informasi ringkas publik proyek untuk halaman survei lapangan.
+    Dapat diakses tanpa login untuk memuat nama proyek & lokasi.
+    """
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyek tidak ditemukan.")
+
+    targets = project.targets_json or {}
+    has_custom_pin = bool(targets.get("field_pin"))
+
+    return {
+        "id": project.id,
+        "name": project.name,
+        "location_name": project.location_name,
+        "project_type": project.project_type,
+        "description": project.description,
+        "status": project.status,
+        "has_custom_pin": has_custom_pin,
+    }
+
+
+@router.post("/{project_id}/field-auth")
+def authenticate_field_access(
+    project_id: int,
+    body: FieldAuthRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Verifikasi PIN proyek untuk surveyor lapangan tanpa akun login pribadi.
+    Jika PIN valid, menerbitkan token sesi akses lapangan (berlaku 7 hari).
+    """
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyek tidak ditemukan.")
+
+    # Ambil PIN yang dikonfigurasi di targets_json, default '1234'
+    targets = project.targets_json or {}
+    expected_pin = str(targets.get("field_pin", "1234")).strip()
+
+    if body.pin.strip() != expected_pin:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="PIN Akses Proyek tidak cocok. Silakan tanyakan PIN yang benar kepada admin/pengelola proyek."
+        )
+
+    # Ambil user penanggung jawab (creator proyek) atau user admin untuk context session
+    user = None
+    if project.created_by:
+        user = db.query(User).filter(User.id == project.created_by).first()
+    if not user:
+        user = db.query(User).filter(User.role.in_(["admin", "super_admin", "field_officer"])).first()
+    if not user:
+        user = db.query(User).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Sistem belum memiliki user penanggung jawab aktif."
+        )
+
+    # Token sesi lapangan berlaku 7 hari agar nyaman digunakan surveyor selama di lokasi
+    token = create_access_token(subject=user.email, expires_delta=timedelta(days=7))
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "project_id": project.id,
+        "project_name": project.name,
+        "location_name": project.location_name,
+        "surveyor_name": body.surveyor_name.strip(),
+    }
+

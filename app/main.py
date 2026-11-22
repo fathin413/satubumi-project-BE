@@ -25,13 +25,16 @@ from app.api.v1.compro.currency import router as currency_router
 from app.api.v1.compro import insight_topics, rulebooks, team_member
 from app.api.v1.monitoring import activity
 from app.api.v1.monitoring.projects import router as projects_router
-from app.api.v1.monitoring.monitor import router as monitor_router
+from app.api.v1.monitoring.monitor import router as monitor_router, trees_router
 
 # Buat folder upload jika belum ada
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 
 # Inisialisasi tabel DB saat startup (jika belum ada)
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    print(f"Warning: Database create_all failed on startup: {e}")
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -70,6 +73,7 @@ app.include_router(team_member.router, prefix=api_v1_prefix)
 app.include_router(activity.router, prefix=api_v1_prefix)
 app.include_router(projects_router, prefix=api_v1_prefix)
 app.include_router(monitor_router, prefix=api_v1_prefix)
+app.include_router(trees_router, prefix=api_v1_prefix)
 
 
 @app.get("/")

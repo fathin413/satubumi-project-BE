@@ -45,7 +45,7 @@ def list_users(
 def create_user(
     user_in: UserCreate,
     db: Session = Depends(get_db),
-    super_admin: User = Depends(require_super_admin),
+    current_admin: User = Depends(require_admin),
 ):
     if user_in.role and user_in.role not in ALLOWED_ROLES:
         raise HTTPException(
@@ -70,7 +70,7 @@ def create_user(
 
     create_activity_log(
         db=db,
-        user=super_admin,
+        user=current_admin,
         action="CREATE",
         module="USER",
         target_id=new_user.id,
@@ -134,7 +134,7 @@ def update_user(
     user_id: int,
     user_in: UserUpdate,
     db: Session = Depends(get_db),
-    super_admin: User = Depends(require_super_admin),
+    current_admin: User = Depends(require_admin),
 ):
     usr = db.query(User).filter(User.id == user_id).first()
     if not usr:
@@ -165,7 +165,7 @@ def update_user(
 
     create_activity_log(
         db=db,
-        user=super_admin,
+        user=current_admin,
         action="UPDATE",
         module="USER",
         target_id=usr.id,
@@ -182,15 +182,27 @@ def update_user(
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    super_admin: User = Depends(require_super_admin),
+    current_admin: User = Depends(require_admin),
 ):
     usr = db.query(User).filter(User.id == user_id).first()
     if not usr:
         raise HTTPException(status_code=404, detail="User tidak ditemukan.")
 
+    if usr.id == current_admin.id:
+        raise HTTPException(
+            status_code=400,
+            detail="Tidak dapat menghapus akun Anda sendiri yang sedang aktif digunakan."
+        )
+
+    if usr.role == "super_admin" and current_admin.role != "super_admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Hanya Super Admin yang diizinkan untuk menghapus akun Super Admin lain."
+        )
+
     create_activity_log(
         db=db,
-        user=super_admin,
+        user=current_admin,
         action="DELETE",
         module="USER",
         target_id=usr.id,
@@ -198,8 +210,15 @@ def delete_user(
         description="Menghapus user",
     )
 
+    try:
+        from app.models.monitor import ProjectMember
+        db.query(ProjectMember).filter(ProjectMember.user_id == user_id).delete(synchronize_session=False)
+    except Exception:
+        pass
+
     db.delete(usr)
     db.commit()
+    return None
 
 
 @router.put("/{user_id}/profile-image")
@@ -207,7 +226,7 @@ async def upload_profile_image(
     user_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    super_admin: User = Depends(require_super_admin),
+    current_admin: User = Depends(require_admin),
 ):
     usr = db.query(User).filter(User.id == user_id).first()
 
@@ -227,7 +246,7 @@ async def upload_profile_image(
 
     create_activity_log(
         db=db,
-        user=super_admin,
+        user=current_admin,
         action="UPLOAD",
         module="USER",
         target_id=usr.id,

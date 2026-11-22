@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, File, UploadFile, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Optional
+from typing import List, Optional, Union, Dict, Any
 from datetime import datetime, date
 import os
 import uuid
+import re
 
 from app.core.database import get_db
+from app.core.activity import create_activity_log
 from app.models.project import Project
 from app.models.monitor import (
     ProjectActivity, TreeRecord, TreeMeasurement, FieldReport,
@@ -19,6 +21,7 @@ from app.schemas.monitor import (
     MonitoringPlotCreate, MonitoringPlotUpdate, MonitoringPlotResponse,
     TreeRecordCreate, TreeRecordUpdate, TreeRecordResponse, TreeSummary,
     TreeMeasurementCreate, TreeMeasurementResponse, TreeGrowthPoint, TreeGrowthResponse,
+    TreeBatchSyncRequest, TreeBatchSyncResponse,
     FieldReportCreate, FieldReportResponse, MediaUploadResponse,
     AlertCreate, AlertUpdate, AlertResponse,
     BiodiversityCreate, BiodiversityResponse, BiodiversitySummary,
@@ -208,7 +211,6 @@ def create_monitoring_plot(
     - `plot_code`: Kode unik plot (misal: "WK-023", "PL-01").
     - `plot_type`: `permanent_plot`, `transect`, `point`.
     """
-    require_field_officer(current_user)
     get_project_or_404(project_id, db, current_user)
 
     # Validasi duplikasi plot_code dalam satu project
@@ -293,7 +295,6 @@ def update_monitoring_plot(
     current_user: User = Depends(get_current_user)
 ):
     """Mengupdate data plot monitoring."""
-    require_field_officer(current_user)
     get_project_or_404(project_id, db, current_user)
 
     plot = db.query(MonitoringPlot).filter(
@@ -410,9 +411,80 @@ def get_activity(
     return activity
 
 
+def normalize_tree_tag(tag: Optional[str]) -> Optional[str]:
+    """
+    Menyeragamkan format penomoran tag pohon:
+    - Huruf otomatis kapital (UPPERCASE)
+    - Pemisah (spasi, underscore, titik) otomatis diubah menjadi dash '-'
+    - Pola [HURUF][ANGKA] otomatis disisipkan dash (misal: 'ffq412' -> 'FFQ-412')
+    - Nomor urut 1-2 digit otomatis di-padding menjadi 3 digit (misal: 'FFQ-5' -> 'FFQ-005')
+    """
+    if not tag:
+        return None
+    cleaned = tag.strip().upper()
+    cleaned = re.sub(r'[\s_.]+', '-', cleaned)
+    cleaned = re.sub(r'^([A-Z]+)(\d+)$', r'\1-\2', cleaned)
+    m = re.match(r'^(.*-)(\d{1,2})$', cleaned)
+    if m:
+        cleaned = f"{m.group(1)}{m.group(2).zfill(3)}"
+    return cleaned
+
+
 # ─────────────────────────────────────────────
-# TREE RECORDS
+# TREE RECORDS & CENSUS
 # ─────────────────────────────────────────────
+
+trees_router = APIRouter(prefix="/trees", tags=["Monitor — Trees"])
+
+
+def check_tree_update_permission(record: TreeRecord, current_user: User, db: Session, project_id: int):
+    """
+    Aturan Otorisasi Pembaruan Data Pohon:
+    - User adalah pembuat data (user.id === tree.created_by).
+    - ATAU role user adalah admin/superadmin/project_manager.
+    - ATAU user terdaftar sebagai project_manager di tabel project_members.
+    Jika tidak memenuhi, kembalikan HTTP 403 Forbidden dengan pesan:
+    'Anda hanya memiliki wewenang untuk mengubah data sensus yang Anda masukkan sendiri.'
+    """
+    if record.created_by is not None and record.created_by == current_user.id:
+        return
+
+    user_role = (current_user.role or "").lower()
+    if user_role in {"admin", "superadmin", "super_admin", "project_manager"}:
+        return
+
+    pm_member = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == current_user.id,
+        ProjectMember.role == "project_manager"
+    ).first()
+    if pm_member:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Anda hanya memiliki wewenang untuk mengubah data sensus yang Anda masukkan sendiri."
+    )
+
+
+def check_tree_delete_permission(record: TreeRecord, current_user: User):
+    """
+    Aturan Otorisasi Penghapusan Data Pohon:
+    - Hanya pemilik data (user.id === tree.created_by) atau role admin yang diizinkan menghapus.
+    - Jika petugas lain mencoba menghapus, tolak dengan HTTP 403 Forbidden.
+    """
+    if record.created_by is not None and record.created_by == current_user.id:
+        return
+
+    user_role = (current_user.role or "").lower()
+    if user_role in {"admin", "superadmin", "super_admin"}:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Anda hanya memiliki wewenang untuk menghapus data sensus yang Anda masukkan sendiri."
+    )
+
 
 @router.post("/{project_id}/trees", response_model=TreeRecordResponse, status_code=status.HTTP_201_CREATED)
 def create_tree_record(
@@ -422,34 +494,57 @@ def create_tree_record(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Menambahkan data tanam pohon (per batch/plot).
-
-    Setelah data disimpan, sistem otomatis mengecek survival rate.
-    Jika survival rate < 70%, alert `low_tree_survival` akan dibuat secara otomatis.
+    Menambahkan data tanam pohon / sensus pohon.
+    Otomatis mengisi created_by dari auth context token dan menyimpan created_by_name.
     """
-    require_admin(current_user)
     get_project_or_404(project_id, db, current_user)
+
+    cleaned_tag = normalize_tree_tag(body.tree_tag)
+
+    calc_circ = body.circumference_cm if body.circumference_cm is not None else (round(body.dbh_cm * 3.14159265, 2) if body.dbh_cm is not None else 0.0)
+    calc_dbh = body.dbh_cm if body.dbh_cm is not None else (round(body.circumference_cm / 3.14159265, 2) if (body.circumference_cm is not None and body.circumference_cm > 0) else None)
+
+    creator_name = body.created_by_name or current_user.full_name or current_user.email
 
     record = TreeRecord(
         project_id=project_id,
         plot_id=body.plot_id,
-        tree_tag=body.tree_tag,
+        tree_tag=cleaned_tag,
         species=body.species,
+        local_name=body.local_name,
         quantity=body.quantity or 1,
-        planting_date=body.planting_date,
+        planting_date=body.planting_date or date.today(),
         location_geojson=body.location_geojson,
         condition=body.condition or "healthy",
         height_cm=body.height_cm,
-        dbh_cm=body.dbh_cm,
+        dbh_cm=calc_dbh,
+        circumference_cm=calc_circ,
+        is_tag_lost=bool(body.is_tag_lost),
         is_alive=body.is_alive if body.is_alive is not None else True,
         photo_urls=body.photo_urls,
         notes=body.notes,
         last_monitored=datetime.utcnow(),
         created_by=current_user.id,
+        created_by_name=creator_name,
     )
     db.add(record)
     db.commit()
     db.refresh(record)
+
+    # Catat audit log aktivitas
+    try:
+        create_activity_log(
+            db=db,
+            user=current_user,
+            action="CREATE",
+            module="TREE_CENSUS",
+            target_id=record.id,
+            target_name=f"{record.species} ({record.tree_tag or record.id})",
+            description=f"Menambahkan data sensus pohon {record.species} di proyek #{project_id}",
+        )
+        db.commit()
+    except Exception:
+        pass
 
     # Auto-check survival rate setelah data baru ditambahkan
     check_and_create_survival_alert(db, project_id)
@@ -462,16 +557,27 @@ def list_tree_records(
     project_id: int,
     plot_id: Optional[str] = Query(None, description="Filter berdasarkan kode plot"),
     species: Optional[str] = Query(None, description="Filter berdasarkan spesies pohon"),
+    created_by: Optional[int] = Query(None, description="Filter berdasarkan ID petugas input (Project Manager melacak tim)"),
+    only_mine: bool = Query(False, description="Jika true, hanya tampilkan pohon yang diinput oleh user ini sendiri"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Mendapatkan semua record pohon untuk satu proyek."""
+    """
+    Mendapatkan semua record pohon untuk satu proyek.
+    Mendukung tracking:
+    - Tim dapat melihat data sensus milik mereka sendiri (?only_mine=true).
+    - Project Manager dapat mengecek aktivitas anggota tim tertentu (?created_by=user_id).
+    """
     get_project_or_404(project_id, db, current_user)
     query = db.query(TreeRecord).filter(TreeRecord.project_id == project_id)
     if plot_id:
         query = query.filter(TreeRecord.plot_id == plot_id)
     if species:
         query = query.filter(TreeRecord.species.ilike(f"%{species}%"))
+    if only_mine:
+        query = query.filter(TreeRecord.created_by == current_user.id)
+    elif created_by is not None:
+        query = query.filter(TreeRecord.created_by == created_by)
     return query.order_by(TreeRecord.planting_date.desc()).all()
 
 
@@ -510,7 +616,7 @@ def get_tree_record(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Mendapatkan detail satu batch penanaman pohon."""
+    """Mendapatkan detail satu batch/data sensus pohon."""
     get_project_or_404(project_id, db, current_user)
     record = (
         db.query(TreeRecord)
@@ -523,6 +629,7 @@ def get_tree_record(
 
 
 @router.put("/{project_id}/trees/{tree_id}", response_model=TreeRecordResponse)
+@router.patch("/{project_id}/trees/{tree_id}", response_model=TreeRecordResponse)
 def update_tree_record(
     project_id: int,
     tree_id: int,
@@ -531,11 +638,12 @@ def update_tree_record(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Update kondisi pohon (monitoring berkala).
-
-    Setelah update, sistem otomatis mengecek survival rate dan membuat alert jika diperlukan.
+    Update kondisi dan data sensus pohon (monitoring berkala).
+    Aturan Otorisasi:
+    - User adalah pembuat data (user.id === tree.created_by).
+    - Atau user adalah admin / superadmin / project_manager.
+    - Field yang dapat diubah: species, local_name, height_cm, dbh_cm, circumference_cm, condition, notes, etc.
     """
-    require_field_officer(current_user)
     get_project_or_404(project_id, db, current_user)
 
     record = (
@@ -546,18 +654,243 @@ def update_tree_record(
     if not record:
         raise HTTPException(status_code=404, detail="Data pohon tidak ditemukan.")
 
+    # Cek wewenang pembaruan data
+    check_tree_update_permission(record, current_user, db, project_id)
+
     update_data = body.model_dump(exclude_unset=True)
+
+    if "tree_tag" in update_data and update_data["tree_tag"] is not None:
+        update_data["tree_tag"] = normalize_tree_tag(update_data["tree_tag"])
+
+    # Keliling dan DBH saling sinkron
+    if "circumference_cm" in update_data and update_data["circumference_cm"] is not None and "dbh_cm" not in update_data:
+        update_data["dbh_cm"] = round(update_data["circumference_cm"] / 3.14159265, 2)
+    elif "dbh_cm" in update_data and update_data["dbh_cm"] is not None and "circumference_cm" not in update_data:
+        update_data["circumference_cm"] = round(update_data["dbh_cm"] * 3.14159265, 2)
+
+    if "condition" in update_data and update_data["condition"] is not None:
+        if update_data["condition"] == "dead" and "is_alive" not in update_data:
+            record.is_alive = False
+        elif update_data["condition"] in {"healthy", "stressed"} and "is_alive" not in update_data:
+            record.is_alive = True
+
+    # Daftar field yang diizinkan untuk diubah
+    allowed_fields = {
+        "species", "local_name", "height_cm", "dbh_cm", "circumference_cm",
+        "condition", "notes", "is_tag_lost", "plot_id", "tree_tag", "quantity",
+        "planting_date", "location_geojson", "is_alive", "photo_urls"
+    }
+
     for field, value in update_data.items():
-        setattr(record, field, value)
+        if field in allowed_fields:
+            setattr(record, field, value)
 
     record.last_monitored = datetime.utcnow()
     db.commit()
     db.refresh(record)
 
+    # Catat audit log aktivitas
+    try:
+        create_activity_log(
+            db=db,
+            user=current_user,
+            action="UPDATE",
+            module="TREE_CENSUS",
+            target_id=record.id,
+            target_name=f"{record.species} ({record.tree_tag or record.id})",
+            description=f"Memperbarui data sensus pohon #{tree_id} di proyek #{project_id}",
+        )
+        db.commit()
+    except Exception:
+        pass
+
     # Auto-check survival rate setelah update
     check_and_create_survival_alert(db, project_id)
 
     return record
+
+
+@router.delete("/{project_id}/trees/{tree_id}", status_code=status.HTTP_200_OK)
+def delete_tree_record(
+    project_id: int,
+    tree_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Menghapus data pohon dan riwayat pengukurannya.
+    Aturan Otorisasi:
+    - Hanya pemilik data (user.id === tree.created_by) atau role admin yang diizinkan menghapus.
+    - Jika petugas lain mencoba menghapus, tolak dengan HTTP 403 Forbidden.
+    """
+    get_project_or_404(project_id, db, current_user)
+
+    record = (
+        db.query(TreeRecord)
+        .filter(TreeRecord.id == tree_id, TreeRecord.project_id == project_id)
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="Data pohon tidak ditemukan.")
+
+    # Cek wewenang penghapusan data
+    check_tree_delete_permission(record, current_user)
+
+    # Catat audit log sebelum dihapus
+    try:
+        create_activity_log(
+            db=db,
+            user=current_user,
+            action="DELETE",
+            module="TREE_CENSUS",
+            target_id=record.id,
+            target_name=f"{record.species} ({record.tree_tag or record.id})",
+            description=f"Menghapus data sensus pohon #{tree_id} di proyek #{project_id}",
+        )
+    except Exception:
+        pass
+
+    # Hapus juga riwayat pengukuran terkait
+    db.query(TreeMeasurement).filter(TreeMeasurement.tree_record_id == tree_id).delete()
+
+    db.delete(record)
+    db.commit()
+
+    # Evaluasi ulang alert survival rate setelah data pohon dihapus
+    check_and_create_survival_alert(db, project_id)
+
+    return {"message": f"Data pohon #{tree_id} ({record.species}) berhasil dihapus."}
+
+
+def handle_sync_batch_logic(
+    payload: Union[List[TreeRecordCreate], TreeBatchSyncRequest, Dict[str, Any]],
+    db: Session,
+    current_user: User,
+    default_project_id: Optional[int] = None
+) -> TreeBatchSyncResponse:
+    """
+    Helper untuk memproses batch sensus pohon (offline-first sync):
+    - Otomatis isi created_by dari auth context token.
+    - Simpan created_by_name jika disertakan (atau nama user saat ini).
+    - Simpan field local_name, circumference_cm, is_tag_lost.
+    """
+    require_field_officer(current_user)
+
+    batch_project_id = default_project_id
+    raw_items: List[Any] = []
+
+    if isinstance(payload, list):
+        raw_items = payload
+    elif isinstance(payload, TreeBatchSyncRequest):
+        batch_project_id = payload.project_id or default_project_id
+        raw_items = payload.trees or payload.items or []
+    elif isinstance(payload, dict):
+        batch_project_id = payload.get("project_id") or default_project_id
+        raw_items = payload.get("trees") or payload.get("items") or []
+
+    created_records: List[TreeRecord] = []
+    affected_projects = set()
+    creator_default_name = current_user.full_name or current_user.email
+
+    for item in raw_items:
+        if isinstance(item, dict):
+            item_model = TreeRecordCreate(**item)
+        else:
+            item_model = item
+
+        item_proj_id = getattr(item_model, "project_id", None) or batch_project_id
+        if not item_proj_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Setiap data sensus pohon wajib menyertakan project_id yang valid."
+            )
+
+        get_project_or_404(item_proj_id, db, current_user)
+        affected_projects.add(item_proj_id)
+
+        cleaned_tag = normalize_tree_tag(item_model.tree_tag)
+
+        calc_circ = item_model.circumference_cm if item_model.circumference_cm is not None else (round(item_model.dbh_cm * 3.14159265, 2) if item_model.dbh_cm is not None else 0.0)
+        calc_dbh = item_model.dbh_cm if item_model.dbh_cm is not None else (round(item_model.circumference_cm / 3.14159265, 2) if (item_model.circumference_cm is not None and item_model.circumference_cm > 0) else None)
+
+        item_creator_name = item_model.created_by_name or creator_default_name
+
+        record = TreeRecord(
+            project_id=item_proj_id,
+            plot_id=item_model.plot_id,
+            tree_tag=cleaned_tag,
+            species=item_model.species,
+            local_name=item_model.local_name,
+            quantity=item_model.quantity or 1,
+            planting_date=item_model.planting_date or date.today(),
+            location_geojson=item_model.location_geojson,
+            condition=item_model.condition or "healthy",
+            height_cm=item_model.height_cm,
+            dbh_cm=calc_dbh,
+            circumference_cm=calc_circ,
+            is_tag_lost=bool(item_model.is_tag_lost),
+            is_alive=item_model.is_alive if item_model.is_alive is not None else True,
+            photo_urls=item_model.photo_urls,
+            notes=item_model.notes,
+            last_monitored=datetime.utcnow(),
+            created_by=current_user.id,
+            created_by_name=item_creator_name,
+        )
+        db.add(record)
+        created_records.append(record)
+
+    db.commit()
+    for rec in created_records:
+        db.refresh(rec)
+
+    for pid in affected_projects:
+        check_and_create_survival_alert(db, pid)
+
+    # Catat audit log aktivitas sync batch
+    try:
+        create_activity_log(
+            db=db,
+            user=current_user,
+            action="SYNC_BATCH",
+            module="TREE_CENSUS",
+            description=f"Sinkronisasi batch offline: berhasil menyimpan {len(created_records)} data sensus pohon.",
+        )
+        db.commit()
+    except Exception:
+        pass
+
+    return TreeBatchSyncResponse(
+        success=True,
+        synced_count=len(created_records),
+        items=created_records,
+        trees=created_records,
+        message=f"Berhasil menyinkronkan {len(created_records)} data sensus pohon."
+    )
+
+
+@router.post("/{project_id}/trees/sync-batch", response_model=TreeBatchSyncResponse, status_code=status.HTTP_201_CREATED)
+def sync_trees_batch_project(
+    project_id: int,
+    payload: Union[TreeBatchSyncRequest, List[TreeRecordCreate], Dict[str, Any]] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Sinkronisasi batch data sensus pohon untuk proyek tertentu (Offline Mobile App Sync).
+    """
+    return handle_sync_batch_logic(payload, db, current_user, default_project_id=project_id)
+
+
+@trees_router.post("/sync-batch", response_model=TreeBatchSyncResponse, status_code=status.HTTP_201_CREATED)
+def sync_trees_batch_global(
+    payload: Union[TreeBatchSyncRequest, List[TreeRecordCreate], Dict[str, Any]] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Sinkronisasi batch data sensus pohon global (POST /api/v1/trees/sync-batch).
+    """
+    return handle_sync_batch_logic(payload, db, current_user)
 
 
 @router.post("/{project_id}/trees/upload-photo")
@@ -568,7 +901,6 @@ async def upload_tree_photo(
     current_user: User = Depends(get_current_user)
 ):
     """Upload foto pohon / monitoring tanaman."""
-    require_field_officer(current_user)
     get_project_or_404(project_id, db, current_user)
 
     upload_dir = "static/trees"
@@ -610,7 +942,6 @@ def create_tree_measurement(
     - Mengupdate `last_monitored` pada TreeRecord terkait serta snapshot kondisi terakhir.
     - Men-trigger pengecekan otomatis survival rate alert.
     """
-    require_field_officer(current_user)
     get_project_or_404(project_id, db, current_user)
 
     tree = db.query(TreeRecord).filter(
@@ -620,12 +951,16 @@ def create_tree_measurement(
     if not tree:
         raise HTTPException(status_code=404, detail="Data pohon tidak ditemukan.")
 
+    calc_circ = body.circumference_cm if body.circumference_cm is not None else (round(body.dbh_cm * 3.14159265, 2) if body.dbh_cm is not None else None)
+    calc_dbh = body.dbh_cm if body.dbh_cm is not None else (round(body.circumference_cm / 3.14159265, 2) if body.circumference_cm is not None else None)
+
     measurement = TreeMeasurement(
         tree_record_id=tree_id,
         project_id=project_id,
         measurement_date=body.measurement_date,
         height_cm=body.height_cm,
-        dbh_cm=body.dbh_cm,
+        dbh_cm=calc_dbh,
+        circumference_cm=calc_circ,
         condition=body.condition,
         is_alive=body.is_alive if body.is_alive is not None else True,
         measured_by=body.measured_by or current_user.full_name,
@@ -634,11 +969,16 @@ def create_tree_measurement(
     )
     db.add(measurement)
 
-    # Update TreeRecord status & timestamp tanpa menimpa baseline height/dbh awal tanam
+    # Update TreeRecord status & timestamp
     if body.condition:
         tree.condition = body.condition
     if body.is_alive is not None:
         tree.is_alive = body.is_alive
+    if body.height_cm is not None:
+        tree.height_cm = body.height_cm
+    if calc_dbh is not None:
+        tree.dbh_cm = calc_dbh
+        tree.circumference_cm = calc_circ
     tree.last_monitored = datetime.utcnow()
 
     db.commit()
@@ -711,6 +1051,7 @@ def get_tree_growth(
         date=tree.planting_date,
         height_cm=tree.height_cm,
         dbh_cm=tree.dbh_cm,
+        circumference_cm=tree.circumference_cm,
         condition=tree.condition,
         is_alive=tree.is_alive,
         measured_by=None,
@@ -723,6 +1064,7 @@ def get_tree_growth(
             date=m.measurement_date,
             height_cm=m.height_cm,
             dbh_cm=m.dbh_cm,
+            circumference_cm=m.circumference_cm,
             condition=m.condition,
             is_alive=m.is_alive,
             measured_by=m.measured_by,
@@ -773,7 +1115,6 @@ def create_field_report(
     Setiap laporan mencakup: **WHO** (officer) + **WHERE** (GPS) +
     **WHEN** (tanggal) + **WHAT** (aktivitas) + **EVIDENCE** (foto/video).
     """
-    require_field_officer(current_user)
     get_project_or_404(project_id, db, current_user)
 
     report = FieldReport(
@@ -859,7 +1200,6 @@ async def upload_media_file(
     Mendukung format gambar (.jpg, .jpeg, .png, .webp) hingga 20MB
     dan video (.mp4, .webm, .mov, .m4v) hingga 100MB.
     """
-    require_field_officer(current_user)
     get_project_or_404(project_id, db, current_user)
 
     filename = file.filename or "media"
@@ -1171,7 +1511,6 @@ def create_biodiversity_observation(
     current_user: User = Depends(get_current_user)
 ):
     """Mencatat observasi biodiversitas baru (satwa atau flora)."""
-    require_field_officer(current_user)
     get_project_or_404(project_id, db, current_user)
 
     legacy_photo = body.photo_url
@@ -1249,7 +1588,6 @@ def update_biodiversity_observation(
     current_user: User = Depends(get_current_user)
 ):
     """Mengubah data observasi biodiversitas."""
-    require_field_officer(current_user)
     get_project_or_404(project_id, db, current_user)
     obs = db.query(BiodiversityObservation).filter(
         BiodiversityObservation.id == obs_id,
@@ -1285,7 +1623,6 @@ def delete_biodiversity_observation(
     current_user: User = Depends(get_current_user)
 ):
     """Menghapus observasi biodiversitas."""
-    require_field_officer(current_user)
     get_project_or_404(project_id, db, current_user)
     obs = db.query(BiodiversityObservation).filter(
         BiodiversityObservation.id == obs_id,

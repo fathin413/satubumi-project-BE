@@ -17,7 +17,7 @@ from typing import List, Dict, Any, Optional
 
 from app.models.project import Project
 from app.models.monitor import (
-    MonitoringPlot, ProjectActivity, TreeRecord, Alert, FieldReport, BiodiversityObservation
+    MonitoringPlot, ProjectActivity, TreeRecord, Alert, FieldReport, BiodiversityObservation, TreeMeasurement
 )
 from app.schemas.monitor import (
     GeoJSONFeature, GeoJSONFeatureCollection, MapLayerSummary, ProjectMapLayersResponse
@@ -121,12 +121,40 @@ def get_project_map_layers(db: Session, project: Project) -> ProjectMapLayersRes
             activity_features.append(feat)
             _extract_coords_from_geojson(a.location_geojson, all_lngs, all_lats)
 
-    # 4. Layer Tree Locations
+    # 4. Layer Tree Locations (Menampilkan snapshot kondisi & pengukuran terbaru dari monitoring)
     tree_records = db.query(TreeRecord).filter(TreeRecord.project_id == project.id).all()
+    tree_ids = [t.id for t in tree_records]
+
+    # Ambil seluruh history pengukuran monitoring berkala untuk menemukan data terkini
+    latest_measurements = {}
+    measurements_count = {}
+    if tree_ids:
+        all_measurements = (
+            db.query(TreeMeasurement)
+            .filter(TreeMeasurement.tree_record_id.in_(tree_ids))
+            .order_by(TreeMeasurement.tree_record_id, TreeMeasurement.measurement_date.asc(), TreeMeasurement.id.asc())
+            .all()
+        )
+        for m in all_measurements:
+            latest_measurements[m.tree_record_id] = m
+            measurements_count[m.tree_record_id] = measurements_count.get(m.tree_record_id, 0) + 1
+
     tree_features = []
     for t in tree_records:
         if t.location_geojson and isinstance(t.location_geojson, dict):
-            first_photo = _extract_first_photo(t.photo_urls)
+            latest_m = latest_measurements.get(t.id)
+
+            # Jika ada pengukuran monitoring berkala, pakai data terbaru; jika belum, pakai data awal tanam
+            current_height = latest_m.height_cm if (latest_m and latest_m.height_cm is not None) else t.height_cm
+            current_dbh = latest_m.dbh_cm if (latest_m and latest_m.dbh_cm is not None) else t.dbh_cm
+            current_condition = latest_m.condition if (latest_m and latest_m.condition) else t.condition
+            current_alive = latest_m.is_alive if (latest_m and latest_m.is_alive is not None) else t.is_alive
+
+            # Foto: utamakan foto monitoring terbaru, jika belum ada pakai foto awal tanam
+            latest_photo = _extract_first_photo(latest_m.photo_urls) if latest_m else None
+            first_photo = latest_photo or _extract_first_photo(t.photo_urls)
+            photo_urls = (latest_m.photo_urls if (latest_m and latest_m.photo_urls) else t.photo_urls)
+
             feat = GeoJSONFeature(
                 type="Feature",
                 geometry=t.location_geojson,
@@ -135,16 +163,26 @@ def get_project_map_layers(db: Session, project: Project) -> ProjectMapLayersRes
                     "plot_id": t.plot_id,
                     "tree_tag": t.tree_tag,
                     "species": t.species,
+                    "local_name": t.local_name,
+                    "circumference_cm": t.circumference_cm,
+                    "is_tag_lost": bool(t.is_tag_lost),
+                    "created_by": t.created_by,
+                    "created_by_name": t.created_by_name,
                     "quantity": t.quantity,
                     "planting_date": t.planting_date.isoformat() if t.planting_date else None,
-                    "condition": t.condition,
-                    "is_alive": t.is_alive,
-                    "height_cm": t.height_cm,
-                    "dbh_cm": t.dbh_cm,
+                    "condition": current_condition,
+                    "is_alive": current_alive,
+                    "height_cm": current_height,
+                    "dbh_cm": current_dbh,
+                    "initial_height_cm": t.height_cm,
+                    "initial_dbh_cm": t.dbh_cm,
                     "photo_url": first_photo,
-                    "photo_urls": t.photo_urls,
-                    "notes": t.notes,
-                    "last_monitored": t.last_monitored.isoformat() if t.last_monitored else None,
+                    "photo_urls": photo_urls,
+                    "notes": (latest_m.notes if (latest_m and latest_m.notes) else t.notes),
+                    "last_monitored": t.last_monitored.isoformat() if t.last_monitored else (
+                        latest_m.measurement_date.isoformat() if latest_m else None
+                    ),
+                    "total_measurements": measurements_count.get(t.id, 0),
                 }
             )
             tree_features.append(feat)

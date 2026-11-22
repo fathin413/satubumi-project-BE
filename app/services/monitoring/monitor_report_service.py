@@ -9,6 +9,7 @@ Menyediakan:
 
 import io
 import csv
+import json
 from datetime import datetime, date
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -482,14 +483,39 @@ def export_project_data_csv(db: Session, project: Project, data_type: str = "tre
     writer = csv.writer(output)
 
     if data_type == "trees":
-        writer.writerow(["ID", "Plot ID", "Species", "Quantity", "Planting Date", "Height (cm)", "DBH (cm)", "Condition", "Is Alive", "Location GeoJSON"])
+        writer.writerow([
+            "ID", "Plot ID", "Tree Tag", "Species", "Quantity", "Planting Date",
+            "Height (cm)", "DBH (cm)", "Condition", "Is Alive", "Latitude", "Longitude",
+            "Photo URL", "Notes"
+        ])
         trees = db.query(TreeRecord).filter(TreeRecord.project_id == project.id).all()
         for t in trees:
+            lng, lat = None, None
+            if t.location_geojson and isinstance(t.location_geojson, dict):
+                coords = t.location_geojson.get("coordinates")
+                if coords and len(coords) >= 2:
+                    lng, lat = coords[0], coords[1]
+            photo_url = None
+            if t.photo_urls:
+                if isinstance(t.photo_urls, list) and len(t.photo_urls) > 0:
+                    photo_url = t.photo_urls[0]
+                elif isinstance(t.photo_urls, str):
+                    try:
+                        p_list = json.loads(t.photo_urls)
+                        photo_url = p_list[0] if (isinstance(p_list, list) and p_list) else t.photo_urls
+                    except Exception:
+                        photo_url = t.photo_urls
             writer.writerow([
-                t.id, t.plot_id, t.species, t.quantity,
+                t.id, t.plot_id or "", t.tree_tag or "", t.species, t.quantity,
                 t.planting_date.isoformat() if t.planting_date else "",
-                t.height_cm, t.dbh_cm, t.condition, t.is_alive,
-                str(t.location_geojson) if t.location_geojson else ""
+                t.height_cm if t.height_cm is not None else "",
+                t.dbh_cm if t.dbh_cm is not None else "",
+                t.condition or "healthy",
+                "Yes" if t.is_alive else "No",
+                lat if lat is not None else "",
+                lng if lng is not None else "",
+                photo_url or "",
+                t.notes or ""
             ])
 
     elif data_type == "activities":
@@ -503,25 +529,40 @@ def export_project_data_csv(db: Session, project: Project, data_type: str = "tre
             ])
 
     elif data_type == "field_reports":
-        writer.writerow(["ID", "Plot ID", "Officer Name", "Report Type", "Report Date", "Notes", "Photo Count", "Video Count"])
+        writer.writerow(["ID", "Plot ID", "Officer Name", "Report Type", "Report Date", "Latitude", "Longitude", "Notes", "Photo Count", "Video Count"])
         reports = db.query(FieldReport).filter(FieldReport.project_id == project.id).all()
         for fr in reports:
+            lng, lat = None, None
+            if fr.location_geojson and isinstance(fr.location_geojson, dict):
+                coords = fr.location_geojson.get("coordinates")
+                if coords and len(coords) >= 2:
+                    lng, lat = coords[0], coords[1]
             writer.writerow([
-                fr.id, fr.plot_id, fr.officer_name, fr.report_type,
+                fr.id, fr.plot_id or "", fr.officer_name, fr.report_type,
                 fr.report_date.isoformat() if fr.report_date else "",
-                fr.notes,
+                lat if lat is not None else "",
+                lng if lng is not None else "",
+                fr.notes or "",
                 len(fr.photo_urls) if fr.photo_urls else 0,
                 len(fr.video_urls) if fr.video_urls else 0
             ])
 
     elif data_type == "biodiversity":
-        writer.writerow(["ID", "Species Name", "Species Type", "Observed Date", "Habitat", "Observer", "Notes"])
+        writer.writerow(["ID", "Species Name", "Species Type", "Observed Date", "Habitat", "Observer", "Latitude", "Longitude", "Notes"])
         bios = db.query(BiodiversityObservation).filter(BiodiversityObservation.project_id == project.id).all()
         for b in bios:
+            lng, lat = None, None
+            if b.location_geojson and isinstance(b.location_geojson, dict):
+                coords = b.location_geojson.get("coordinates")
+                if coords and len(coords) >= 2:
+                    lng, lat = coords[0], coords[1]
             writer.writerow([
                 b.id, b.species_name, b.species_type,
                 b.observed_date.isoformat() if b.observed_date else "",
-                b.habitat, b.observer, b.notes
+                b.habitat or "", b.observer or "",
+                lat if lat is not None else "",
+                lng if lng is not None else "",
+                b.notes or ""
             ])
 
     elif data_type == "carbon":

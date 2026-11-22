@@ -126,31 +126,40 @@ class MonitoringPlotResponse(BaseModel):
 
 class TreeRecordCreate(BaseModel):
     """Request body untuk menambah data tanam pohon."""
+    project_id: Optional[int] = Field(None, description="ID proyek jika tidak ada di path URL")
     plot_id: Optional[str] = Field(None, max_length=100, description="Kode plot, misal WK-023")
     tree_tag: Optional[str] = Field(None, max_length=100, description="Nomor Tag / ID fisik pohon (misal TR-001)")
-    species: str = Field(..., max_length=255, description="Jenis/spesies pohon")
+    species: str = Field(..., max_length=255, description="Nama latin / ilmiah pohon (misal: Coffea canephora)")
+    local_name: Optional[str] = Field(None, max_length=255, description="Nama lokal / nama umum pohon (misal: Kopi Robusta)")
     quantity: Optional[int] = Field(1, ge=1, description="Jumlah pohon (1 untuk sensus individual)")
-    planting_date: date = Field(..., description="Tanggal penanaman")
+    planting_date: Optional[date] = Field(default_factory=date.today, description="Tanggal penanaman")
     location_geojson: Optional[Dict[str, Any]] = Field(None, description="Lokasi plot (GeoJSON Point)")
     condition: Optional[str] = Field("healthy", description="Kondisi: healthy, stressed, dead")
     height_cm: Optional[float] = Field(None, description="Tinggi pohon (cm)")
     dbh_cm: Optional[float] = Field(None, description="Diameter Breast Height (cm)")
+    circumference_cm: Optional[float] = Field(0.0, description="Keliling batang (cm)")
+    is_tag_lost: Optional[bool] = Field(False, description="Flag apakah QR tag fisik hilang/rusak di lapangan")
     is_alive: Optional[bool] = Field(True, description="Status hidup pohon")
     photo_urls: Optional[List[str]] = Field(None, description="List URL foto")
     notes: Optional[str] = None
+    created_by: Optional[int] = Field(None, description="ID pengguna pembuat data sensus")
+    created_by_name: Optional[str] = Field(None, max_length=255, description="Nama lengkap pengguna saat data diinput")
 
 
 class TreeRecordUpdate(BaseModel):
     """Request body untuk update kondisi dan data tanam pohon."""
     plot_id: Optional[str] = Field(None, max_length=100, description="Kode plot, misal WK-023")
     tree_tag: Optional[str] = Field(None, max_length=100, description="Nomor Tag / ID fisik pohon")
-    species: Optional[str] = Field(None, max_length=255, description="Jenis/spesies pohon")
+    species: Optional[str] = Field(None, max_length=255, description="Nama latin / ilmiah pohon (misal: Coffea canephora)")
+    local_name: Optional[str] = Field(None, max_length=255, description="Nama lokal / nama umum pohon (misal: Kopi Robusta)")
     quantity: Optional[int] = Field(None, ge=1, description="Jumlah pohon")
     planting_date: Optional[date] = Field(None, description="Tanggal penanaman")
     location_geojson: Optional[Dict[str, Any]] = Field(None, description="Lokasi plot (GeoJSON Point)")
     condition: Optional[str] = Field(None, description="Kondisi: healthy, stressed, dead")
     height_cm: Optional[float] = Field(None, description="Tinggi pohon (cm)")
     dbh_cm: Optional[float] = Field(None, description="Diameter Breast Height (cm)")
+    circumference_cm: Optional[float] = Field(None, description="Keliling batang (cm)")
+    is_tag_lost: Optional[bool] = Field(None, description="Flag apakah QR tag fisik hilang/rusak di lapangan")
     is_alive: Optional[bool] = Field(None, description="Status hidup pohon")
     photo_urls: Optional[List[str]] = Field(None, description="List URL foto")
     notes: Optional[str] = Field(None, description="Catatan tambahan / koreksi")
@@ -163,21 +172,41 @@ class TreeRecordResponse(BaseModel):
     plot_id: Optional[str] = None
     tree_tag: Optional[str] = None
     species: str
+    local_name: Optional[str] = None
     quantity: int
     planting_date: date
     location_geojson: Optional[Dict[str, Any]] = None
     condition: str
     height_cm: Optional[float] = None
     dbh_cm: Optional[float] = None
+    circumference_cm: Optional[float] = 0.0
+    is_tag_lost: bool = False
     is_alive: bool
     photo_urls: Optional[List[str]] = None
     notes: Optional[str] = None
     last_monitored: Optional[datetime] = None
     created_by: Optional[int] = None
+    created_by_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class TreeBatchSyncRequest(BaseModel):
+    """Request body untuk sinkronisasi batch sensus pohon (offline mobile app)."""
+    project_id: Optional[int] = Field(None, description="ID Proyek jika tidak ada di dalam objek pohon")
+    trees: Optional[List[TreeRecordCreate]] = Field(None, description="Daftar data sensus pohon")
+    items: Optional[List[TreeRecordCreate]] = Field(None, description="Alias untuk trees")
+
+
+class TreeBatchSyncResponse(BaseModel):
+    """Response hasil sinkronisasi batch data pohon."""
+    success: bool = True
+    synced_count: int
+    items: List[TreeRecordResponse] = []
+    trees: List[TreeRecordResponse] = []
+    message: str = "Berhasil menyinkronkan data sensus pohon."
 
 
 class TreeSummary(BaseModel):
@@ -198,6 +227,7 @@ class TreeMeasurementCreate(BaseModel):
     measurement_date: date = Field(..., description="Tanggal pengukuran")
     height_cm: Optional[float] = Field(None, description="Tinggi pohon saat diukur (cm)")
     dbh_cm: Optional[float] = Field(None, description="Diameter Breast Height saat diukur (cm)")
+    circumference_cm: Optional[float] = Field(None, description="Keliling batang saat diukur (cm)")
     condition: Optional[str] = Field(None, max_length=50, description="Kondisi: healthy, stressed, dead")
     is_alive: Optional[bool] = Field(True, description="Status hidup pohon")
     measured_by: Optional[str] = Field(None, max_length=255, description="Nama pengukur/petugas")
@@ -213,6 +243,7 @@ class TreeMeasurementResponse(BaseModel):
     measurement_date: date
     height_cm: Optional[float] = None
     dbh_cm: Optional[float] = None
+    circumference_cm: Optional[float] = None
     condition: Optional[str] = None
     is_alive: bool
     measured_by: Optional[str] = None
@@ -228,6 +259,7 @@ class TreeGrowthPoint(BaseModel):
     date: date
     height_cm: Optional[float] = None
     dbh_cm: Optional[float] = None
+    circumference_cm: Optional[float] = None
     condition: Optional[str] = None
     is_alive: bool
     measured_by: Optional[str] = None

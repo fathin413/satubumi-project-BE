@@ -241,28 +241,47 @@ PROJECT ➔ MAP ➔ MONITOR ➔ MEASURE ➔ COMPARE ➔ ALERT ➔ REPORT (MRV)
   ```
 - **Daftar Plot**: `GET /api/v1/projects/{project_id}/plots`
 
-#### B. Update / Koreksi Data Tanam & Kondisi Pohon
-- **Method / URL**: `PUT /api/v1/projects/{project_id}/trees/{tree_id}`
+#### B. Tambah, Update, Hapus & Sinkronisasi Sensus Pohon
+
+##### 1. Tambah Data Sensus Pohon
+- **Method / URL**: `POST /api/v1/projects/{project_id}/trees`
 - **Auth**: `Bearer Token` (`field_officer`, `admin`, `super_admin`)
-- **Request Body** (Semua field opsional, hanya kirim field yang ingin diupdate):
+- **Catatan**: `created_by` otomatis diisi dari ID user token yang login, dan `created_by_name` otomatis terisi dari profil user jika tidak dikirim spesifik.
+- **Request Body**:
   ```json
   {
     "species": "Shorea balangeran",
-    "quantity": 15,
-    "planting_date": "2026-09-02",
+    "local_name": "Belangeran Merah",
+    "tree_tag": "TR-001",
     "plot_id": "PL-SBG-01",
-    "location_geojson": {
-      "type": "Point",
-      "coordinates": [113.85, -2.23]
-    },
-    "condition": "stressed",
-    "height_cm": 120.5,
-    "dbh_cm": 7.2,
-    "is_alive": true,
-    "photo_urls": [
-      "https://storage.satubumi.org/evidence/tree_update_01.jpg"
-    ],
-    "notes": "koreksi jumlah dan kondisi pohon terkini"
+    "quantity": 1,
+    "planting_date": "2026-03-01",
+    "circumference_cm": 25.5,
+    "height_cm": 150.0,
+    "is_tag_lost": false,
+    "condition": "healthy",
+    "notes": "Hasil sensus barcode pohon"
+  }
+  ```
+
+##### 2. Update / Koreksi Data Sensus Pohon
+- **Method / URL**: `PUT /api/v1/projects/{project_id}/trees/{tree_id}` atau `PATCH /api/v1/projects/{project_id}/trees/{tree_id}`
+- **Auth**: `Bearer Token`
+- **Aturan Otorisasi (Authorization Rule)**:
+  * Pembuat data (`user.id === tree.created_by`) berhak mengubah datanya.
+  * User ber-role `admin`, `super_admin`, atau `project_manager` (di sistem atau di proyek) berhak mengubah.
+  * Petugas lapangan lain yang bukan pembuat data akan ditolak dengan **`HTTP 403 Forbidden`**:
+    `"detail": "Anda hanya memiliki wewenang untuk mengubah data sensus yang Anda masukkan sendiri."`
+- **Field yang dapat diubah**: `species`, `local_name`, `height_cm`, `dbh_cm`, `circumference_cm`, `condition`, `notes`, `is_tag_lost`.
+- **Request Body** (Semua field opsional, hanya kirim field yang ingin diupdate):
+  ```json
+  {
+    "local_name": "Belangeran Super",
+    "circumference_cm": 28.0,
+    "height_cm": 160.0,
+    "condition": "healthy",
+    "is_tag_lost": true,
+    "notes": "Tag barcode fisik terlepas karena angin kencang"
   }
   ```
 - **Response `200 OK`**:
@@ -271,22 +290,79 @@ PROJECT ➔ MAP ➔ MONITOR ➔ MEASURE ➔ COMPARE ➔ ALERT ➔ REPORT (MRV)
     "id": 10,
     "project_id": 1,
     "plot_id": "PL-SBG-01",
+    "tree_tag": "TR-001",
     "species": "Shorea balangeran",
-    "quantity": 15,
-    "planting_date": "2026-09-02",
-    "location_geojson": { "type": "Point", "coordinates": [113.85, -2.23] },
-    "condition": "stressed",
-    "height_cm": 120.5,
-    "dbh_cm": 7.2,
+    "local_name": "Belangeran Super",
+    "quantity": 1,
+    "planting_date": "2026-03-01",
+    "location_geojson": null,
+    "condition": "healthy",
+    "height_cm": 160.0,
+    "dbh_cm": 8.91,
+    "circumference_cm": 28.0,
+    "is_tag_lost": true,
     "is_alive": true,
-    "photo_urls": ["https://storage.satubumi.org/evidence/tree_update_01.jpg"],
-    "notes": "koreksi jumlah dan kondisi pohon terkini",
-    "last_monitored": "2026-09-02T15:10:00Z",
-    "created_by": 2,
-    "created_at": "2026-01-10T08:00:00Z",
-    "updated_at": "2026-09-02T15:10:00Z"
+    "photo_urls": [],
+    "notes": "Tag barcode fisik terlepas karena angin kencang",
+    "last_monitored": "2026-03-01T15:10:00Z",
+    "created_by": 101,
+    "created_by_name": "Budi Santoso",
+    "created_at": "2026-03-01T08:00:00Z",
+    "updated_at": "2026-03-01T15:10:00Z"
   }
   ```
+
+##### 3. Hapus Data Sensus Pohon
+- **Method / URL**: `DELETE /api/v1/projects/{project_id}/trees/{tree_id}`
+- **Auth**: `Bearer Token`
+- **Aturan Otorisasi**:
+  * Hanya pembuat data (`user.id === tree.created_by`) atau `admin` / `super_admin` yang diizinkan menghapus.
+  * Petugas lapangan lain akan ditolak dengan **`HTTP 403 Forbidden`**:
+    `"detail": "Anda hanya memiliki wewenang untuk menghapus data sensus yang Anda masukkan sendiri."`
+
+##### 4. Sinkronisasi Batch Sensus Pohon (Mobile Offline-First)
+- **Method / URL**: `POST /api/v1/trees/sync-batch` atau `POST /api/v1/projects/{project_id}/trees/sync-batch`
+- **Auth**: `Bearer Token` (`field_officer`, `admin`, `super_admin`)
+- **Request Body**:
+  ```json
+  {
+    "project_id": 1,
+    "trees": [
+      {
+        "species": "Alstonia scholaris",
+        "local_name": "Pulai",
+        "tree_tag": "TR-101",
+        "circumference_cm": 42.0,
+        "is_tag_lost": false,
+        "condition": "healthy",
+        "notes": "Sensus offline batch 1"
+      }
+    ]
+  }
+  ```
+- **Response `201 Created`**:
+  ```json
+  {
+    "success": true,
+    "synced_count": 1,
+    "items": [...],
+    "message": "Berhasil menyinkronkan 1 data sensus pohon."
+  }
+  ```
+
+##### 5. Daftar & Pelacakan Sensus Pohon Tim
+- **Method / URL**: `GET /api/v1/projects/{project_id}/trees`
+- **Query Params**:
+  * `only_mine=true`: *(Untuk petugas lapangan)* Hanya mengambil data pohon yang diinput oleh diri sendiri.
+  * `created_by={user_id}`: *(Untuk Project Manager / Admin)* Melacak pohon yang diinput oleh anggota tim tertentu.
+  * `plot_id={code}`: Filter berdasarkan kode plot.
+  * `species={name}`: Filter berdasarkan nama spesies pohon.
+
+##### 6. Pelacakan Log Aktivitas Monitoring (Activity Logs)
+- **Log Aktivitas Diri Sendiri**: `GET /api/v1/activity/me`
+  * Menampilkan riwayat aksi (`CREATE`, `UPDATE`, `DELETE`, `SYNC_BATCH`) yang dilakukan oleh user login.
+- **Log Aktivitas Tim Proyek (Untuk Project Manager / Admin)**: `GET /api/v1/activity/project/{project_id}`
+  * Parameter opsional: `?user_id={id}` untuk memfilter aktivitas anggota tim spesifik.
 
 #### C. Catat Pengukuran Berkala Pohon
 - **Method / URL**: `POST /api/v1/projects/{project_id}/trees/{tree_id}/measurements`

@@ -2,6 +2,7 @@ from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Float, DateTime, Date, ForeignKey, Text, JSON, Boolean, UniqueConstraint
 )
+from sqlalchemy.orm import relationship
 
 from app.core.database import Base
 
@@ -99,7 +100,8 @@ class TreeRecord(Base):
     plot_id = Column(String(100), nullable=True)    # Kode plot, misal "WK-023" (referensi ke monitoring_plots.plot_code)
     tree_tag = Column(String(100), nullable=True, index=True) # Nomor Tag / ID unik pohon individual, misal "TR-001"
 
-    species = Column(String(255), nullable=False)
+    species = Column(String(255), nullable=False)       # Nama Latin / Ilmiah (misal: "Coffea canephora")
+    local_name = Column(String(255), nullable=True)       # Nama Lokal / Nama Umum (misal: "Kopi Robusta", "Alpukat")
     quantity = Column(Integer, nullable=False, default=1)  # Jumlah pohon (default 1 untuk individual)
     planting_date = Column(Date, nullable=False)
     location_geojson = Column(JSON, nullable=True)  # GeoJSON Point lokasi plot
@@ -108,6 +110,8 @@ class TreeRecord(Base):
     condition = Column(String(50), default="healthy")  # healthy, stressed, dead
     height_cm = Column(Float, nullable=True)
     dbh_cm = Column(Float, nullable=True)  # Diameter Breast Height
+    circumference_cm = Column(Float, nullable=True, default=0.0)  # Keliling Batang (cm)
+    is_tag_lost = Column(Boolean, default=False, nullable=False)  # Flag apakah QR tag fisik hilang/rusak di lapangan
     is_alive = Column(Boolean, default=True)
 
     photo_urls = Column(JSON, nullable=True)
@@ -115,6 +119,7 @@ class TreeRecord(Base):
     last_monitored = Column(DateTime, nullable=True)
 
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)  # [NEW] siapa yang input data
+    created_by_name = Column(String(255), nullable=True)  # Nama lengkap pengguna saat data diinput
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -139,6 +144,7 @@ class TreeMeasurement(Base):
     measurement_date = Column(Date, nullable=False)
     height_cm = Column(Float, nullable=True)
     dbh_cm = Column(Float, nullable=True)              # Diameter Breast Height (cm)
+    circumference_cm = Column(Float, nullable=True)    # Keliling Batang (cm)
     condition = Column(String(50), nullable=True)      # healthy, stressed, dead
     is_alive = Column(Boolean, default=True)
 
