@@ -103,6 +103,8 @@ async def get_articles(
     is_featured: bool | None = Query(None),
     author: str | None = Query(None),
     lang: str = Query("id", description="id | en"),
+    limit: int = Query(50, ge=1, le=100, description="Maksimum artikel per halaman"),
+    offset: int = Query(0, ge=0, description="Offset pagination"),
     db: Session = Depends(get_db),
 ):
     query = db.query(Article)
@@ -115,7 +117,7 @@ async def get_articles(
     if author:
         query = query.filter(Article.author == author)
 
-    articles = query.order_by(Article.created_at.desc()).all()
+    articles = query.order_by(Article.created_at.desc()).offset(offset).limit(limit).all()
     return [serialize_article(art, lang) for art in articles]
 
 

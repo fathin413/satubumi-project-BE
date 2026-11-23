@@ -559,6 +559,8 @@ def list_tree_records(
     species: Optional[str] = Query(None, description="Filter berdasarkan spesies pohon"),
     created_by: Optional[int] = Query(None, description="Filter berdasarkan ID petugas input (Project Manager melacak tim)"),
     only_mine: bool = Query(False, description="Jika true, hanya tampilkan pohon yang diinput oleh user ini sendiri"),
+    limit: Optional[int] = Query(None, ge=1, le=1000, description="Maksimum record yang dikembalikan (opsional)"),
+    offset: int = Query(0, ge=0, description="Offset pagination"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -578,7 +580,11 @@ def list_tree_records(
         query = query.filter(TreeRecord.created_by == current_user.id)
     elif created_by is not None:
         query = query.filter(TreeRecord.created_by == created_by)
-    return query.order_by(TreeRecord.planting_date.desc()).all()
+
+    query = query.order_by(TreeRecord.planting_date.desc()).offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()
 
 
 @router.get("/{project_id}/trees/summary", response_model=TreeSummary)

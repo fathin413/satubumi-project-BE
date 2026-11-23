@@ -26,6 +26,8 @@ ENV/
 
 # Environment Variables & Secrets
 .env
+.env*
+!.env.example
 *-9e94dc4d0800.json
 post-app-*.json
 *.json
