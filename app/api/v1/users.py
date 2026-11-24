@@ -211,8 +211,26 @@ def delete_user(
     )
 
     try:
-        from app.models.monitor import ProjectMember
+        from app.models.monitor import (
+            ProjectMember, TreeRecord, FieldReport, MonitoringPlot,
+            ProjectActivity, Alert, LandscapeSnapshot
+        )
+        from app.models.assessment import Assessment
+        from app.models.article import Article
+        from app.models.project import Project
+        from app.models.activity_log import ActivityLog
+
         db.query(ProjectMember).filter(ProjectMember.user_id == user_id).delete(synchronize_session=False)
+        db.query(Assessment).filter(Assessment.user_id == user_id).update({Assessment.user_id: None}, synchronize_session=False)
+        db.query(Article).filter(Article.author_id == user_id).update({Article.author_id: None}, synchronize_session=False)
+        db.query(Project).filter(Project.created_by == user_id).update({Project.created_by: None}, synchronize_session=False)
+        db.query(TreeRecord).filter(TreeRecord.created_by == user_id).update({TreeRecord.created_by: None}, synchronize_session=False)
+        db.query(FieldReport).filter(FieldReport.created_by == user_id).update({FieldReport.created_by: None}, synchronize_session=False)
+        db.query(MonitoringPlot).filter(MonitoringPlot.created_by == user_id).update({MonitoringPlot.created_by: None}, synchronize_session=False)
+        db.query(ProjectActivity).filter(ProjectActivity.created_by == user_id).update({ProjectActivity.created_by: None}, synchronize_session=False)
+        db.query(Alert).filter(Alert.created_by == user_id).update({Alert.created_by: None}, synchronize_session=False)
+        db.query(LandscapeSnapshot).filter(LandscapeSnapshot.created_by == user_id).update({LandscapeSnapshot.created_by: None}, synchronize_session=False)
+        db.query(ActivityLog).filter(ActivityLog.user_id == user_id).update({ActivityLog.user_id: None}, synchronize_session=False)
     except Exception:
         pass
 

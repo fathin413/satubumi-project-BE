@@ -24,7 +24,7 @@ class Article(Base):
     author = Column(String(255), default="Satubumi Team")
 
     # Relasi baru ke tabel users
-    author_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    author_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     author_user = relationship("User", foreign_keys=[author_id])
 

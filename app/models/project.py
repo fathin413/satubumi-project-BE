@@ -35,7 +35,7 @@ class Project(Base):
     # Contoh: {"restoration_ha": 1000, "tree_planting": 100000}
     targets_json = Column(JSON, nullable=True)
 
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

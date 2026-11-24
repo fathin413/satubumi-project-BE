@@ -9,7 +9,7 @@ class Assessment(Base):
     __tablename__ = "assessments"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Data kontak submitter (untuk user guest maupun logged-in)
     submitter_name = Column(String(255), nullable=True)

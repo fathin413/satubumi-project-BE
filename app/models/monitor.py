@@ -41,7 +41,7 @@ class ProjectActivity(Base):
     photo_urls = Column(JSON, nullable=True)  # List URL foto dokumentasi
     notes = Column(Text, nullable=True)
 
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -79,7 +79,7 @@ class MonitoringPlot(Base):
     status = Column(String(50), default="active", nullable=False)
     notes = Column(Text, nullable=True)
 
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -118,7 +118,7 @@ class TreeRecord(Base):
     notes = Column(Text, nullable=True)
     last_monitored = Column(DateTime, nullable=True)
 
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)  # [NEW] siapa yang input data
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # [NEW] siapa yang input data
     created_by_name = Column(String(255), nullable=True)  # Nama lengkap pengguna saat data diinput
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -189,7 +189,7 @@ class FieldReport(Base):
     tree_record_id = Column(Integer, ForeignKey("tree_records.id"), nullable=True)
     biodiversity_id = Column(Integer, ForeignKey("biodiversity_observations.id"), nullable=True)
 
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -226,7 +226,7 @@ class Alert(Base):
     auto_generated = Column(Boolean, default=False)
 
     # [NEW] Siapa yang membuat alert (untuk alert manual)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # [NEW] URL sumber data yang memicu alert (GEE, satellite data, dll)
     source_url = Column(String(500), nullable=True)
@@ -362,7 +362,7 @@ class LandscapeSnapshot(Base):
     geojson_data = Column(JSON, nullable=True)
 
     notes = Column(Text, nullable=True)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -382,7 +382,7 @@ class ProjectMember(Base):
     role = Column(String(50), nullable=False, default="viewer")
 
     assigned_at = Column(DateTime, default=datetime.utcnow)
-    assigned_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assigned_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("project_id", "user_id", name="uq_project_member"),
