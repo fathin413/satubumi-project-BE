@@ -1,6 +1,6 @@
 from datetime import datetime
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, Date, ForeignKey, Text, JSON, Boolean, UniqueConstraint
+    Column, Integer, String, Float, DateTime, Date, ForeignKey, Text, JSON, Boolean, UniqueConstraint, text
 )
 from sqlalchemy.orm import relationship
 
@@ -110,8 +110,8 @@ class TreeRecord(Base):
     condition = Column(String(50), default="healthy")  # healthy, stressed, dead
     height_cm = Column(Float, nullable=True)
     dbh_cm = Column(Float, nullable=True)  # Diameter Breast Height
-    circumference_cm = Column(Float, nullable=True, default=0.0)  # Keliling Batang (cm)
-    is_tag_lost = Column(Boolean, default=False, nullable=False)  # Flag apakah QR tag fisik hilang/rusak di lapangan
+    circumference_cm = Column(Float, nullable=True, default=0.0, server_default=text("0.0"))  # Keliling Batang (cm)
+    is_tag_lost = Column(Boolean, default=False, server_default=text("false"), nullable=True)  # Flag apakah QR tag fisik hilang/rusak di lapangan
     is_alive = Column(Boolean, default=True)
 
     photo_urls = Column(JSON, nullable=True)
