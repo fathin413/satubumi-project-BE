@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 import os
 import shutil
+import uuid
 
 from typing import List
 
@@ -159,6 +160,7 @@ def delete_team_member(
 
 
 @router.post("/{member_id}/image")
+@router.put("/{member_id}/image")
 async def upload_team_image(
     member_id: int,
     file: UploadFile = File(...),
@@ -173,16 +175,23 @@ async def upload_team_image(
             detail="Team member tidak ditemukan",
         )
 
-    upload_dir = "static/team"
-    os.makedirs(upload_dir, exist_ok=True)
+    file_bytes = await file.read()
+    content_type = file.content_type or "image/jpeg"
+    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+    unique_filename = f"team_{member_id}_{uuid.uuid4().hex[:8]}{ext}"
+    storage_path = f"team/{unique_filename}"
 
-    filename = f"team_{member_id}_{file.filename}"
-    path = f"{upload_dir}/{filename}"
-
-    with open(path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    member.image_url = "/" + path
+    try:
+        from app.core.storage import upload_public_file
+        public_url = upload_public_file(storage_path, file_bytes, content_type)
+        member.image_url = public_url
+    except Exception:
+        upload_dir = "static/team"
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = f"{upload_dir}/{unique_filename}"
+        with open(file_path, "wb") as buffer:
+            buffer.write(file_bytes)
+        member.image_url = "/" + file_path
 
     create_activity_log(
         db=db,

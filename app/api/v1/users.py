@@ -1,5 +1,6 @@
 import os
 import shutil
+import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -240,6 +241,7 @@ def delete_user(
 
 
 @router.put("/{user_id}/profile-image")
+@router.post("/{user_id}/profile-image")
 async def upload_profile_image(
     user_id: int,
     file: UploadFile = File(...),
@@ -251,16 +253,23 @@ async def upload_profile_image(
     if not usr:
         raise HTTPException(status_code=404, detail="User tidak ditemukan.")
 
-    upload_dir = "static/profile"
-    os.makedirs(upload_dir, exist_ok=True)
+    file_bytes = await file.read()
+    content_type = file.content_type or "image/jpeg"
+    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+    unique_filename = f"user_{usr.id}_{uuid.uuid4().hex[:8]}{ext}"
+    storage_path = f"profiles/{unique_filename}"
 
-    filename = f"user_{usr.id}_{file.filename}"
-    file_path = f"{upload_dir}/{filename}"
-
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    usr.profile_image = "/" + file_path
+    try:
+        from app.core.storage import upload_public_file
+        public_url = upload_public_file(storage_path, file_bytes, content_type)
+        usr.profile_image = public_url
+    except Exception:
+        upload_dir = "static/profile"
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = f"{upload_dir}/{unique_filename}"
+        with open(file_path, "wb") as buffer:
+            buffer.write(file_bytes)
+        usr.profile_image = "/" + file_path
 
     create_activity_log(
         db=db,
@@ -273,6 +282,8 @@ async def upload_profile_image(
     )
 
     db.commit()
+    db.refresh(usr)
+    return {"message": "Profile image updated", "profile_image": usr.profile_image}
     db.refresh(usr)
 
     return {"message": "Profile image updated", "profile_image": usr.profile_image}

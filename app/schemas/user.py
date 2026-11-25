@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 
 from pydantic import BaseModel, EmailStr
 
@@ -39,6 +39,7 @@ class ProfileUpdate(BaseModel):
     phone_number: str | None = None
     email: EmailStr | None = None
     password: str | None = None
+    profile_image: str | None = None
 
 
 class RapidFsAccessRequestBody(BaseModel):
